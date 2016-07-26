@@ -27,100 +27,99 @@
 ```
 /**
  * 竞选Master
-  * <p/>
-   * /soa/master/services/**.**.**.AccountService:1.0.0   data [192.168.99.100:9090]
-    */
-    public void runForMaster(String key) {
-        zk.create(PATH + key, currentContainerAddr.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL, masterCreateCb, key);
-	}
+ * <p/>
+ * /soa/master/services/**.**.**.AccountService:1.0.0   data [192.168.99.100:9090]
+ */
+public void runForMaster(String key) {
+    zk.create(PATH + key, currentContainerAddr.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL, masterCreateCb, key);
+}
 
-	private AsyncCallback.StringCallback masterCreateCb = (rc, path, ctx, name) -> {
-	    switch (KeeperException.Code.get(rc)) {
-	            case CONNECTIONLOSS:
-		                //检查master状态
-				            checkMaster((String) ctx);
-					                break;
-							        case OK:
-								            //被选为master
-									                isMaster.put((String) ctx, true);
-											            LOGGER.info("{}竞选master成功, data为[{}]", (String) ctx, currentContainerAddr);
-												                break;
-														        case NODEEXISTS:
-															            //master节点上已存在相同的service:version，自己没选上
-																                isMaster.put((String) ctx, false);
-																		            LOGGER.info("{}竞选master失败, data为[{}]", (String) ctx, currentContainerAddr);
-																			                //保持监听
-																					            masterExists((String) ctx);
-																						                break;
-																								        case NONODE:
-																									            LOGGER.error("{}的父节点不存在，创建失败", path);
-																										                break;
-																												        default:
-																													            LOGGER.error("创建{}异常：{}", path, KeeperException.Code.get(rc));
-																														        }
-																															};
+private AsyncCallback.StringCallback masterCreateCb = (rc, path, ctx, name) -> {
+    switch (KeeperException.Code.get(rc)) {
+        case CONNECTIONLOSS:
+            //检查master状态
+            checkMaster((String) ctx);
+            break;
+        case OK:
+            //被选为master
+            isMaster.put((String) ctx, true);
+            LOGGER.info("{}竞选master成功, data为[{}]", (String) ctx, currentContainerAddr);
+            break;
+        case NODEEXISTS:
+            //master节点上已存在相同的service:version，自己没选上
+            isMaster.put((String) ctx, false);
+            LOGGER.info("{}竞选master失败, data为[{}]", (String) ctx, currentContainerAddr);
+            //保持监听
+            masterExists((String) ctx);
+            break;
+        case NONODE:
+            LOGGER.error("{}的父节点不存在，创建失败", path);
+            break;
+        default:
+            LOGGER.error("创建{}异常：{}", path, KeeperException.Code.get(rc));
+    }
+};
 
-																															/**
-																															 * 监听master是否存在
-																															  */
-																															  private void masterExists(String key) {
+/**
+ * 监听master是否存在
+ */
+private void masterExists(String key) {
 
-																															      zk.exists(PATH + key, event -> {
-																															              //若master节点已被删除,则竞争master
-																																              if (event.getType() == Watcher.Event.EventType.NodeDeleted) {
-																																	                  String serviceKey = event.getPath().replace(PATH, "");
-																																			              runForMaster(serviceKey);
-																																				              }
+    zk.exists(PATH + key, event -> {
+        //若master节点已被删除,则竞争master
+        if (event.getType() == Watcher.Event.EventType.NodeDeleted) {
+            String serviceKey = event.getPath().replace(PATH, "");
+            runForMaster(serviceKey);
+        }
 
-																																					          }, (rc, path, ctx, stat) -> {
+    }, (rc, path, ctx, stat) -> {
 
-																																						          switch (KeeperException.Code.get(rc)) {
-																																							              case CONNECTIONLOSS:
-																																								                      masterExists((String) ctx);
-																																										                      break;
-																																												                  case NONODE:
-																																														                  runForMaster((String) ctx);
-																																																                  break;
-																																																		              case OK:
-																																																			                      if (stat == null) {
-																																																					                          runForMaster((String) ctx);
-																																																								                  } else {
-																																																										                      checkMaster((String) ctx);
-																																																												                      }
-																																																														                      break;
-																																																																                  default:
-																																																																		                  checkMaster((String) ctx);
-																																																																				                  break;
-																																																																						          }
+        switch (KeeperException.Code.get(rc)) {
+            case CONNECTIONLOSS:
+                masterExists((String) ctx);
+                break;
+            case NONODE:
+                runForMaster((String) ctx);
+                break;
+            case OK:
+                if (stat == null) {
+                    runForMaster((String) ctx);
+                } else {
+                    checkMaster((String) ctx);
+                }
+                break;
+            default:
+                checkMaster((String) ctx);
+                break;
+        }
 
-																																																																							      }, key);
-																																																																							      }
+    }, key);
+}
 
-																																																																							      /**
-																																																																							       * 检查master
-																																																																							        *
-																																																																								 * @param serviceKey
-																																																																								  */
-																																																																								  private void checkMaster(String serviceKey) {
+/**
+ * 检查master
+ *
+ * @param serviceKey
+ */
+private void checkMaster(String serviceKey) {
 
-																																																																								      zk.getData(PATH + serviceKey, false, (rc, path, ctx, data, stat) -> {
-																																																																								              switch (KeeperException.Code.get(rc)) {
-																																																																									                  case CONNECTIONLOSS:
-																																																																											                  checkMaster((String) ctx);
-																																																																													                  return;
-																																																																															              case NONODE: // 没有master节点存在，则尝试获取领导权
-																																																																																                      runForMaster((String) ctx);
-																																																																																		                      return;
-																																																																																				                  case OK:
-																																																																																						                  String value = new String(data);
-																																																																																								                  if (value.equals(currentContainerAddr))
-																																																																																										                      isMaster.put((String) ctx, true);
-																																																																																												                      else
-																																																																																														                          isMaster.put((String) ctx, false);
-																																																																																																	                  return;
-																																																																																																			          }
+    zk.getData(PATH + serviceKey, false, (rc, path, ctx, data, stat) -> {
+        switch (KeeperException.Code.get(rc)) {
+            case CONNECTIONLOSS:
+                checkMaster((String) ctx);
+                return;
+            case NONODE: // 没有master节点存在，则尝试获取领导权
+                runForMaster((String) ctx);
+                return;
+            case OK:
+                String value = new String(data);
+                if (value.equals(currentContainerAddr))
+                    isMaster.put((String) ctx, true);
+                else
+                    isMaster.put((String) ctx, false);
+                return;
+        }
 
-																																																																																																				      }, serviceKey);
-																																																																																																				      }
-																																																																																																				      ```
-
+    }, serviceKey);
+}
+```
